@@ -23,12 +23,16 @@ Auth should be in the "user:password" format.\
 - ```HUBOT_ACTIVE_MQ_URL```
 - ```HUBOT_ACTIVE_MQ_AUTH```
 - ```HUBOT_ACTIVE_MQ_BROKER```
+- ```HUBOT_ACTIVE_MQ_{1-N}_URL```
+- ```HUBOT_ACTIVE_MQ_{1-N}_AUTH```
+- ```HUBOT_ACTIVE_MQ_{1-N}_BROKER```
 
 ### Commands
 - ```hubot mq list``` - lists all queues
-- ```hubot mq describe <queueName>``` - retrieves information for given queue
-- ```hubot mq d <queueNumber>``` - retrieves information for given queue
+- ```hubot mq stats <queueName>``` - retrieves stats  for given queue
+- ```hubot mq s <queueNumber>``` - retrieves stats  for given queue
 - ```hubot mq stats``` - retrieves stats for broker
+- ```hubot mq queue stats``` - retrieves stats for all queues
 - ```hubot mq servers``` - lists all servers and queues attached to them.
 
 ### Persistence **

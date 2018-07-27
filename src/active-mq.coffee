@@ -8,14 +8,18 @@
 #   HUBOT_ACTIVE_MQ_URL
 #   HUBOT_ACTIVE_MQ_AUTH
 #   HUBOT_ACTIVE_MQ_BROKER
+#   HUBOT_ACTIVE_MQ_{1-N}_URL
+#   HUBOT_ACTIVE_MQ_{1-N}_AUTH
+#   HUBOT_ACTIVE_MQ_{1-N}_BROKER
 #
 #   Auth should be in the "user:password" format.
 #
 # Commands:
-#   hubot mq list - lists all queues.
-#   hubot mq describe <queueName> - retrieves information for given queue.
-#   hubot mq d <queueNumber> - retrieves information for given queue. List queues to get number.
-#   hubot mq stats - retrieves stats for broker.
+#   hubot mq list - lists all queues of all servers.
+#   hubot mq stats <queueName> - retrieves stats for given queue.
+#   hubot mq s <queueNumber> - retrieves stats for given queue. List queues to get number.
+#   hubot mq stats - retrieves stats for broker of all servers.
+#   hubot mq queue stats - retrieves stats for all queues
 #   hubot mq servers - lists all servers and queues attached to them.
 #
 # Author:
@@ -144,6 +148,10 @@ class HubotActiveMQPlugin extends HubotMessenger
   _params: null
   # stores a function to be called after the initial 'list' has completed
   _delayedFunction: null
+  # stores how many queues have been described before sending the message
+  _describedQueues = 0
+  _queuesToDescribe = 0
+  _describedQueuesResponse = null
 
 
   # Init
@@ -173,6 +181,17 @@ class HubotActiveMQPlugin extends HubotMessenger
 
   # Public API
   # ----------
+  describeAll: =>
+    return if not @_init(@describeAll)
+    @_queuesToDescribe = 0
+    @_describedQueues = 0
+    @_describedQueuesResponse = ''
+    for server in @_serverManager.listServers()
+        @_queuesToDescribe += server.getQueues().length
+
+    for server in @_serverManager.listServers()
+      for queue in server.getQueues()
+        @_requestFactorySingle server, "api/jolokia/read/org.apache.activemq:type=Broker,brokerName=#{server.brokerName},destinationType=Queue,destinationName=#{queue.destinationName}", @_handleDescribeAll
 
   describeById: =>
     return if not @_init(@describeById)
@@ -243,11 +262,17 @@ class HubotActiveMQPlugin extends HubotMessenger
     request.header('Content-Length', 0)
     request
 
+  _describeQueueAll: (queue) =>
+    response = ""
+    response += "#{queue.Name} :: Queue Size:#{queue.QueueSize}, Consumers:#{queue.ConsumerCount}\n"
+    response
+
   _describeQueue: (queue) =>
     response = ""
     response += "Name: #{queue.Name}\n"
     response += "Paused: #{queue.Paused}\n"
     response += "Queue Size: #{queue.QueueSize}\n"
+    response += "Consumer Count: #{queue.ConsumerCount}\n"
     response += "Memory Usage: #{queue.MemoryPercentUsage}%\n"
     response += "Cursor Usage: #{queue.CursorPercentUsage}%"
     response
@@ -284,7 +309,20 @@ class HubotActiveMQPlugin extends HubotMessenger
 
   # Handlers
   # --------
+  _handleDescribeAll: (err, res, body, server) =>
+    if err
+      @send err
+      return
 
+    try
+      content = JSON.parse(body)
+      @_describedQueuesResponse += @_describeQueueAll(content.value)
+      @_describedQueues++
+      @send @_describedQueuesResponse if @_describedQueues == @_queuesToDescribe
+    catch error
+      @send error
+  
+  
   _handleDescribe: (err, res, body, server) =>
     if err
       @send err
@@ -350,17 +388,20 @@ module.exports = (robot) ->
 
   robot.respond /m(?:q)? list( (.+))?/i, id: 'activemq.list', (msg) ->
     pluginFactory(msg).list()
+	
+  robot.respond /m(?:q)? queue stats/i, id: 'activemq.describeQueues', (msg) ->
+    pluginFactory(msg).describeAll()  
 
-  robot.respond /m(?:q)? describe (.*)/i, id: 'activemq.describe', (msg) ->
+  robot.respond /m(?:q)? stats (.*)/i, id: 'activemq.describe', (msg) ->
     pluginFactory(msg).describe()
 	
-  robot.respond /m(?:q)? d (\d+)/i, id: 'activemq.d', (msg) ->
+  robot.respond /m(?:q)? s (\d+)/i, id: 'activemq.d', (msg) ->
     pluginFactory(msg).describeById()
 
   robot.respond /m(?:q)? servers/i, id: 'activemq.servers', (msg) ->
     pluginFactory(msg).servers()
 
-  robot.respond /m(?:q)? stats/i, id: 'activemq.stats', (msg) ->
+  robot.respond /m(?:q)? stats$/i, id: 'activemq.stats', (msg) ->
     pluginFactory(msg).stats()
 
   robot.activemq =
