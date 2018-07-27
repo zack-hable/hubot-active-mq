@@ -8,7 +8,7 @@ In hubot project repo, run:
 
 `npm install git+https://github.com/zack-hable/hubot-active-mq --save`
 
-Then add **hubot-jenkins-enhanced-improved** to your `external-scripts.json`:
+Then add **hubot-active-mq** to your `external-scripts.json`:
 
 ```json
 [
@@ -29,7 +29,7 @@ Auth should be in the "user:password" format.\
 - ```hubot mq describe <queueName>``` - retrieves information for given queue
 - ```hubot mq d <queueNumber>``` - retrieves information for given queue
 - ```hubot mq stats``` - retrieves stats for broker
-- ```hubot mq s``` - retrieves stats for broker
+- ```hubot mq servers``` - lists all servers and queues attached to them.
 
 ### Persistence **
 Note: Various features will work best if the Hubot brain is configured to be persisted. By default
