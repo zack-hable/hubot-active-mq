@@ -1,0 +1,26 @@
+{
+  "name": "hubot-active-mq",
+  "description": "Active MQ integration for Hubot with multiple server support",
+  "version": "1.0.0",
+  "author": "Zack Hable <zack@cobaltdevteam.com>",
+  "license": "MIT",
+  "keywords": [
+    "hubot",
+    "hubot-scripts"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git://github.com/zack-hable/hubot-active-mq.git"
+  },
+  "bugs": {
+    "url": "https://github.com/zack-hable/hubot-active-mq/issues"
+  },
+  "dependencies": {
+    "coffee-script": "~1.6"
+  },
+  "devDependencies": {},
+  "main": "index.coffee",
+  "scripts": {
+    "test": "script/test"
+  }
+}
