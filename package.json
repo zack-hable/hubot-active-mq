@@ -16,8 +16,8 @@
     "url": "https://github.com/zack-hable/hubot-active-mq/issues"
   },
   "dependencies": {
-    "coffee-script": "~1.6"
-	"node-schedule": "~1.3"
+    "coffee-script": "~1.6",
+    "node-schedule": "~1.3"
   },
   "devDependencies": {},
   "main": "index.coffee",
