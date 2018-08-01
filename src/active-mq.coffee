@@ -26,7 +26,7 @@
 #   hubot mq alert start - starts all alerts
 #   hubot mq alert stop <AlertNumber> - stops given alert.  use alert list to get id
 #   hubot mq alert stop  - stops all alerts
-#   hubot check <QueueName> every <X> <days|hours|minutes|seconds> and alert me when <queue size|consumer count> is (>|<|=|<=|>=|!=|<>) <Threshold> - Creates an alert that checks <QueueName> at time interval specified for conditions specified and alerts when conditions are met
+#   hubot mq check <QueueName> every <X> <days|hours|minutes|seconds> and alert me when <queue size|consumer count> is (>|<|=|<=|>=|!=|<>) <Threshold> - Creates an alert that checks <QueueName> at time interval specified for conditions specified and alerts when conditions are met
 #
 # Author:
 #   zack-hable
@@ -110,38 +110,45 @@ class ActiveMQAlert
     @_roomId = roomId
     @_compOp = comparisonOp
     @_compVal = comparisonVal
-    @_totalFails = 0
     @_job = null
-    console.log("Room ID: #{@_roomId}")
-    if (timeUnit.indexOf("day") != -1)
-      @_pattern = "* * * */#{time} * *"
-    else if (timeUnit.indexOf("hour") != -1)
-      @_pattern = "* * */#{time} * * *"
-    else if (timeUnit.indexOf("minute") != -1)
-      @_pattern = "* */#{time} * * * *"
-    else if (timeUnit.indexOf("second") != -1)
+    @_lastFailValue = null
+    if (timeUnit.indexOf("days") != -1)
+      @_pattern = "* * */#{time} * *"
+    else if (timeUnit.indexOf("hours") != -1)
+      @_pattern = "* */#{time} * * *"
+    else if (timeUnit.indexOf("minutes") != -1)
+      @_pattern = "*/#{time} * * * *"
+    else if (timeUnit.indexOf("seconds") != -1)
       @_pattern = "*/#{time} * * * * *"
     else
       @_pattern = "* */10 * * * *"
 
   start: =>
-    @_job = schedule.scheduleJob(@_pattern, @_handleAlert)
+    @_job = schedule.scheduleJob(@_pattern, @_handleAlert) if not @isRunning()
 
   stop: =>
-    @_job.cancel()
-    @_job = null	
+    if @isRunning()
+      @_job.cancel()
+      @_job = null	
 
   isRunning: =>
     @_job != null
+	
+  nextRun: =>
+    return @_job.nextInvocation() if @isRunning()
 
   toString: =>
     alertStatus = if @isRunning() then "ON" else "OFF"
-    return "[#{alertStatus}] #{@queue} - Checks #{@_type} every #{@_time} #{@_timeUnit} and notifies when #{@_compOp} #{@_compVal} on #{@server.url}"
+    alertNextRun = if @isRunning() then "\nNext check: #{@nextRun()}"  else ""
+    return "[#{alertStatus}] #{@queue} - Checks #{@_type} every #{@_time} #{@_timeUnit} and notifies when #{@_compOp} #{@_compVal} on #{@server.url}#{alertNextRun}"
 
   serialize: =>
     return [@server, @queue, @_type, @_time, @_timeUnit, @_compOp, @_compVal, @_roomId, @isRunning()]
 
   _alertFail: (value) =>
+    if (value == null)
+      return false
+
     if (@_compOp == ">")
       return value > @_compVal
     else if (@_compOp == "<")
@@ -156,8 +163,33 @@ class ActiveMQAlert
       return value != @_compVal
     return false
 
+  _alertFailFurther: (value) =>
+    if (@_lastFailValue == null or value == null)
+      return false
+
+    if (@_compOp == ">")
+      return value >= @_lastFailValue
+    else if (@_compOp == "<")
+      return value <= @_lastFailValue
+    else if (@_compOp == "=")
+      return value == @_lastFailValue
+    else if (@_compOp == "<=")
+      return value <= @_lastFailValue
+    else if (@_compOp == ">=")
+      return value >= @_lastFailValue
+    else if (@_compOp == "!=" or @_compOp == "<>")
+      return value != @_lastFailValue
+    return false
+
   _handleAlert: =>
     @_reqFactory(@server, "api/jolokia/read/org.apache.activemq:type=Broker,brokerName=#{@server.brokerName},destinationType=Queue,destinationName=#{@queue}", @_handleAlertResponse)
+
+  _handleAlertSecondCheck: =>
+    if ((@_time > 30 and @_timeUnit.indexOf("seconds") != -1 or @_timeUnit.indexOf("seconds") == -1) and @_lastFailValue != null)
+      console.log("Waiting 30 seconds before checking again")
+      setTimeout ->
+        @_handleAlert
+      , 30000 
 
   _handleAlertResponse: (err, res, body, server) =>
     if err
@@ -168,19 +200,30 @@ class ActiveMQAlert
     try
       content = JSON.parse(body)
       content = content.value
+      currentFail = null
 
-      if (@_type == @QUEUESIZE and @_alertFail(content.QueueSize))
-        @_totalFails++
-        resp = ":rotating_light: #{@queue}'s #{@_type} is currently #{content.QueueSize} :rotating_light:"
-      else if (@_type == @CONSUMERCOUNT and @_alertFail(content.ConsumerCount))
-        @_totalFails++
-        resp = ":rotating_light: #{@queue}'s #{@_type} is currently #{content.ConsumerCount} :rotating_light:"
+      # load value we need to check against
+      valueToCheck = null
+      if (@_type == @QUEUESIZE)
+        valueToCheck = content.QueueSize
+      else if (@_type == @CONSUMERCOUNT)
+        valueToCheck = content.ConsumerCount
+
+      # check if it fails our checks
+      if (@_alertFail(valueToCheck))
+        currentFail = valueToCheck
+        if (@_lastFailValue == null)
+          @_lastFailValue = valueToCheck
+          # wait 30 seconds and check the job again to see if its getting further from the alert threshold
+          @_handleAlertSecondCheck
       else
-        @_totalFails = 0
+        # no failures, reset last failure value
+        @_lastFailValue = null
 
-      if (@_totalFails >= @TOTAL_FAIL_THRESHOLD)
-        @_totalFails = 0
-        @robot.messageRoom(@_roomId, resp)
+      if (@_alertFailFurther(currentFail))
+        console.log("sending alert to client")
+        @_lastFailValue = null
+        @robot.messageRoom(@_roomId, ":rotating_light: #{@queue}'s #{@_type} is currently #{currentFail} and is getting further away from the alert value of #{@_compVal} :rotating_light:")
     catch error
       console.log(error)
       @robot.messageRoom(@_roomId, "An error occurred while contacting Active MQ")
@@ -301,7 +344,7 @@ class HubotActiveMQPlugin extends HubotMessenger
     if !alertObj
       @msg.send "I couldn't find that alert. Try `mq alert list` to get a list."
       return
-    alertObj.stop() if alertObj.isRunning()
+    alertObj.stop()
     alertId = parseInt(@msg.match[1])-1
     @robot.brain.get(STORE_KEY).alerts[alertId] = alertObj.serialize()
     @msg.send "This alert has been stopped"
@@ -309,7 +352,7 @@ class HubotActiveMQPlugin extends HubotMessenger
   stopAllAlert: =>
     return if not @_init(@stopAllAlert)
     for alertObj, alertId in @_alerts
-      alertObj.stop() if alertObj.isRunning()
+      alertObj.stop()
       @robot.brain.get(STORE_KEY).alerts[alertId] = alertObj.serialize()
     @msg.send "All alerts have been stopped"
 
@@ -319,7 +362,7 @@ class HubotActiveMQPlugin extends HubotMessenger
     if !alertObj
       @msg.send "I couldn't find that alert. Try `mq alert list` to get a list."
       return
-    alertObj.start() if not alertObj.isRunning()
+    alertObj.start()
     alertId = parseInt(@msg.match[1])-1
     @robot.brain.get(STORE_KEY).alerts[alertId] = alertObj.serialize()
     @msg.send "This alert has been started"
@@ -327,7 +370,7 @@ class HubotActiveMQPlugin extends HubotMessenger
   startAllAlert: =>
     return if not @_init(@startAllAlert)
     for alertObj, alertId in @_alerts
-      alertObj.start() if not alertObj.isRunning()
+      alertObj.start()
       @robot.brain.get(STORE_KEY).alerts[alertId] = alertObj.serialize()
     @msg.send "All alerts have been started"
 
@@ -337,14 +380,10 @@ class HubotActiveMQPlugin extends HubotMessenger
     if !alertObj
       @msg.send "I couldn't find that alert. Try `mq alert list` to get a list."
       return
-    alertObj.stop() if alertObj.isRunning()
+    alertObj.stop()
     alertId = parseInt(@msg.match[1])-1
-    if (@_alerts.length == 1)
-      @_alerts = []
-      @robot.brain.get(STORE_KEY).alerts = []
-    else
-      @_alerts = @_alerts.splice(alertId, 1)
-      @robot.brain.get(STORE_KEY).alerts = @robot.brain.get(STORE_KEY).alerts.splice(alertId, 1)
+    @_alerts.splice(alertId, 1)
+    @robot.brain.get(STORE_KEY).alerts.splice(alertId, 1)
     @msg.send "This alert has been deleted"
  
   queueSizeAlertSetup: =>
@@ -604,7 +643,7 @@ module.exports = (robot) ->
   robot.respond /m(?:q)? queue stats/i, id: 'activemq.describeQueues', (msg) ->
     pluginFactory(msg).describeAll()
 
-  robot.respond /c(?:heck)? (.*) every (\d+) (days|hours|minutes|seconds) and alert me when (queue size|consumer count) is (>|<|=|<=|>=|!=|<>) (\d+)/i, id: 'activemq.queueAlertSetup', (msg) ->
+  robot.respond /m(?:q)? check (.*) every (\d+) (days|hours|minutes|seconds) and alert me when (queue size|consumer count) is (>|<|=|<=|>=|!=|<>) (\d+)/i, id: 'activemq.queueAlertSetup', (msg) ->
     pluginFactory(msg).queueSizeAlertSetup()
 
   robot.respond /m(?:q)? alert list/i, id: 'activemq.listAlert', (msg) ->
