@@ -32,6 +32,7 @@
 #   zack-hable
 #
 schedule = require('node-schedule')
+{WebClient} = require "@slack/client"
 STORE_KEY = 'hubot_active_mq'
 
 Array::where = (query) ->
@@ -137,6 +138,9 @@ class ActiveMQAlert
   nextRun: =>
     return @_job.nextInvocation() if @isRunning()
 
+  getChannel: =>
+    return @_roomId
+
   toString: =>
     alertStatus = if @isRunning() then "ON" else "OFF"
     alertNextRun = if @isRunning() then "\nNext check: #{@nextRun()}"  else ""
@@ -221,7 +225,6 @@ class ActiveMQAlert
         @_lastFailValue = null
 
       if (@_alertFailFurther(currentFail))
-        console.log("sending alert to client")
         @_lastFailValue = null
         @robot.messageRoom(@_roomId, ":rotating_light: #{@queue}'s #{@_type} is currently #{currentFail} and is getting further away from the alert value of #{@_compVal} :rotating_light:")
     catch error
@@ -328,15 +331,50 @@ class HubotActiveMQPlugin extends HubotMessenger
   # Public API
   # ----------
   listAlert: =>
+    # todo: remove this dependency on slack (if its even possible at this point :/)
     return if not @_init(@listAlert)
-    resp = ""
-    index = 1
-    for alertObj in @_alerts
-      resp += "[#{index}] #{alertObj.toString()}\n"
-      index++
-    if (resp == "")
-      resp = "It appears you don't have any alerts set up yet."
-    @send resp
+    web = new WebClient @robot.adapter.options.token
+    # this mess of calls is due to Slack not giving user "channels" in the conversations call
+    # todo: clean up with mess and use async to make it a little nicer looking
+    web.conversations.list()
+    .then((resp) => 
+      channels = resp.channels
+      chanNames = {}
+      for channel in channels
+        chanNames[channel.id] = "#"+channel.name
+      web.im.list()
+      .then((resp) =>
+        dms = resp.ims
+        web.users.list()
+        .then((resp) =>
+          users = resp.members
+          for dm in dms
+            for user in users
+              if (dm.user == user.id)
+                chanNames[dm.id] = "@"+user.name
+          resp = ""
+          index = 1
+          for alertObj in @_alerts
+            resp += "[#{index}] [#{chanNames[alertObj.getChannel()]}] #{alertObj.toString()}\n"
+            index++
+          if (resp == "")
+            resp = "It appears you don't have any alerts set up yet in this channel."
+          @send resp
+        )
+        .catch((err) => 
+          @send "There was an error communicating with the Slack API"
+          console.log(err)
+        )
+      )
+      .catch((err) => 
+        @send "There was an error communicating with the Slack API"
+        console.log(err)
+      )
+    )
+    .catch((err) => 
+      @send "There was an error communicating with the Slack API"
+      console.log(err)
+    )
 
   stopAlert: =>
     return if not @_init(@stopAlert)
@@ -461,11 +499,9 @@ class HubotActiveMQPlugin extends HubotMessenger
     if !@robot.brain.get(STORE_KEY)
       @robot.brain.set(STORE_KEY, {"alerts":[]})
     
-    console.log("loading alerts from file...")
     if (@robot.brain.get(STORE_KEY).alerts)
       for alertObj in @robot.brain.get(STORE_KEY).alerts
         @_alertFromBrain alertObj...
-    console.log("done loading alerts from file")
 
   _alertFromBrain: (server, queue, type, time, timeUnit, comparisonOp, comparisonVal, roomId, shouldBeRunning) =>
     try
@@ -473,7 +509,6 @@ class HubotActiveMQPlugin extends HubotMessenger
       @_alerts.push(alertObj)
       if (shouldBeRunning)
         alertObj.start()
-      console.log("Loaded #{alertObj.toString()}")
     catch error
       console.log("error loading alert from brain")
 
