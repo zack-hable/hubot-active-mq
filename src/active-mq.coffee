@@ -21,17 +21,16 @@
 #   hubot mq stats - retrieves stats for broker of all servers.
 #   hubot mq queue stats - retrieves stats for all queues
 #   hubot mq servers - lists all servers and queues attached to them.
-#   hubot mq alert list
-#   hubot mq alert start <AlertNumber>
-#   hubot mq alert start
-#   hubot mq alert stop <AlertNumber>
-#   hubot mq alert stop
-#   hubot check <QueueName> every <X> <days|hours|minutes|seconds> and alert me when <queue size|consumer count> is (>|<|=|<=|>=) <Threshold>
+#   hubot mq alert list - list all alerts and their statuses
+#   hubot mq alert start <AlertNumber> - starts given alert.  use alert list to get id
+#   hubot mq alert start - starts all alerts
+#   hubot mq alert stop <AlertNumber> - stops given alert.  use alert list to get id
+#   hubot mq alert stop  - stops all alerts
+#   hubot check <QueueName> every <X> <days|hours|minutes|seconds> and alert me when <queue size|consumer count> is (>|<|=|<=|>=|!=|<>) <Threshold> - Creates an alert that checks <QueueName> at time interval specified for conditions specified and alerts when conditions are met
 #
 # Author:
 #   zack-hable
 #
-
 schedule = require('node-schedule')
 STORE_KEY = 'hubot_active_mq'
 
@@ -100,18 +99,20 @@ class ActiveMQAlert
   CONSUMERCOUNT: "consumer count"
   TOTAL_FAIL_THRESHOLD: 2
   
-  constructor: (server, queue, reqFactory, type, time, timeUnit, comparisonOp, comparisonVal, alertCallback) ->
+  constructor: (server, queue, reqFactory, type, time, timeUnit, comparisonOp, comparisonVal, robot, roomId) ->
     @server = server
     @queue = queue
+    @robot = robot
     @_reqFactory = reqFactory
     @_time = time
     @_timeUnit = timeUnit
     @_type = type
-    @_alertCallback = alertCallback
+    @_roomId = roomId
     @_compOp = comparisonOp
     @_compVal = comparisonVal
     @_totalFails = 0
     @_job = null
+    console.log("Room ID: #{@_roomId}")
     if (timeUnit.indexOf("day") != -1)
       @_pattern = "* * * */#{time} * *"
     else if (timeUnit.indexOf("hour") != -1)
@@ -138,7 +139,7 @@ class ActiveMQAlert
     return "[#{alertStatus}] #{@queue} - Checks #{@_type} every #{@_time} #{@_timeUnit} and notifies when #{@_compOp} #{@_compVal} on #{@server.url}"
 
   serialize: =>
-    return [@server, @queue, @_type, @_time, @_timeUnit, @_compOp, @_compVal, @isRunning()]
+    return [@server, @queue, @_type, @_time, @_timeUnit, @_compOp, @_compVal, @_roomId, @isRunning()]
 
   _alertFail: (value) =>
     if (@_compOp == ">")
@@ -151,6 +152,8 @@ class ActiveMQAlert
       return value <= @_compVal
     else if (@_compOp == ">=")
       return value >= @_compVal
+    else if (@_compOp == "!=" or @_compOp == "<>")
+      return value != @_compVal
     return false
 
   _handleAlert: =>
@@ -158,7 +161,8 @@ class ActiveMQAlert
 
   _handleAlertResponse: (err, res, body, server) =>
     if err
-      @_alertCallback err
+      console.log(err)
+      @robot.messageRoom(@_roomId, "An error occurred while contacting Active MQ")
       return
 
     try
@@ -167,16 +171,22 @@ class ActiveMQAlert
 
       if (@_type == @QUEUESIZE and @_alertFail(content.QueueSize))
         @_totalFails++
+        resp = ":rotating_light: #{@queue}'s #{@_type} is currently #{content.QueueSize} :rotating_light:"
       else if (@_type == @CONSUMERCOUNT and @_alertFail(content.ConsumerCount))
         @_totalFails++
+        resp = ":rotating_light: #{@queue}'s #{@_type} is currently #{content.ConsumerCount} :rotating_light:"
       else
         @_totalFails = 0
 
       if (@_totalFails >= @TOTAL_FAIL_THRESHOLD)
         @_totalFails = 0
-        @_alertCallback content
+        @robot.messageRoom(@_roomId, resp)
     catch error
-      @_alertCallback error      
+      console.log(error)
+      @robot.messageRoom(@_roomId, "An error occurred while contacting Active MQ")
+
+  _handleQueueSizeAlert: (info) =>
+    
 
 class ActiveMQServerManager extends HubotMessenger
   _servers: []
@@ -293,14 +303,14 @@ class HubotActiveMQPlugin extends HubotMessenger
       return
     alertObj.stop() if alertObj.isRunning()
     alertId = parseInt(@msg.match[1])-1
-    @robot.brain.get(STORE_KEY).alerts[alertId] = @alertObj.serialize()
+    @robot.brain.get(STORE_KEY).alerts[alertId] = alertObj.serialize()
     @msg.send "This alert has been stopped"
 
   stopAllAlert: =>
     return if not @_init(@stopAllAlert)
     for alertObj, alertId in @_alerts
       alertObj.stop() if alertObj.isRunning()
-      @robot.brain.get(STORE_KEY).alerts[alertId] = @alertObj.serialize()
+      @robot.brain.get(STORE_KEY).alerts[alertId] = alertObj.serialize()
     @msg.send "All alerts have been stopped"
 
   startAlert: =>
@@ -311,14 +321,14 @@ class HubotActiveMQPlugin extends HubotMessenger
       return
     alertObj.start() if not alertObj.isRunning()
     alertId = parseInt(@msg.match[1])-1
-    @robot.brain.get(STORE_KEY).alerts[alertId] = @alertObj.serialize()
+    @robot.brain.get(STORE_KEY).alerts[alertId] = alertObj.serialize()
     @msg.send "This alert has been started"
 
   startAllAlert: =>
     return if not @_init(@startAllAlert)
     for alertObj, alertId in @_alerts
       alertObj.start() if not alertObj.isRunning()
-      @robot.brain.get(STORE_KEY).alerts[alertId] = @alertObj.serialize()
+      @robot.brain.get(STORE_KEY).alerts[alertId] = alertObj.serialize()
     @msg.send "All alerts have been started"
 
   deleteAlert: =>
@@ -329,8 +339,12 @@ class HubotActiveMQPlugin extends HubotMessenger
       return
     alertObj.stop() if alertObj.isRunning()
     alertId = parseInt(@msg.match[1])-1
-    @_alerts = @_alerts.splice(alertId, 1)
-    @robot.brain.get(STORE_KEY).alerts = @robot.brain.get(STORE_KEY).alerts.splice(alertId, 1)
+    if (@_alerts.length == 1)
+      @_alerts = []
+      @robot.brain.get(STORE_KEY).alerts = []
+    else
+      @_alerts = @_alerts.splice(alertId, 1)
+      @robot.brain.get(STORE_KEY).alerts = @robot.brain.get(STORE_KEY).alerts.splice(alertId, 1)
     @msg.send "This alert has been deleted"
  
   queueSizeAlertSetup: =>
@@ -345,7 +359,8 @@ class HubotActiveMQPlugin extends HubotMessenger
     type = @msg.match[4]
     comparisonOp = @msg.match[5]
     comparisonVal = @msg.match[6]
-    alertObj = new ActiveMQAlert(server, queue, @_requestFactorySingle, type, time, timeUnit, comparisonOp, comparisonVal, @_handleQueueSizeAlert)
+    # todo: make this less slack dependent
+    alertObj = new ActiveMQAlert(server, queue, @_requestFactorySingle, type, time, timeUnit, comparisonOp, comparisonVal, @robot, @msg.message.rawMessage.channel)
     @_alerts.push(alertObj)
     alertObj.start()
     @robot.brain.get(STORE_KEY).alerts.push(alertObj.serialize())
@@ -404,24 +419,24 @@ class HubotActiveMQPlugin extends HubotMessenger
   # Utility Methods
   # ---------------
   syncAlerts: =>
-    @msg.send "Loading my memories, give me a moment!"
     if !@robot.brain.get(STORE_KEY)
       @robot.brain.set(STORE_KEY, {"alerts":[]})
     
+    console.log("loading alerts from file...")
     if (@robot.brain.get(STORE_KEY).alerts)
       for alertObj in @robot.brain.get(STORE_KEY).alerts
         @_alertFromBrain alertObj...
-    @msg.send "I think I know where I am now!  Let's get to work."
+    console.log("done loading alerts from file")
 
-  _alertFromBrain: (server, queue, type, time, timeUnit, comparisonOp, comparisonVal, shouldBeRunning) =>
+  _alertFromBrain: (server, queue, type, time, timeUnit, comparisonOp, comparisonVal, roomId, shouldBeRunning) =>
     try
-      alertObj = new ActiveMQAlert(server, queue, @_requestFactorySingle, type, time, timeUnit, comparisonOp, comparisonVal, @_handleQueueSizeAlert)
+      alertObj = new ActiveMQAlert(server, queue, @_requestFactorySingle, type, time, timeUnit, comparisonOp, comparisonVal, @robot, roomId)
       @_alerts.push(alertObj)
       if (shouldBeRunning)
         alertObj.start()
-      @msg.send "Loaded #{alertObj.toString()}"
+      console.log("Loaded #{alertObj.toString()}")
     catch error
-      @msg.send "I seem to have hit a repressed memory, check my logs and brain please!"
+      console.log("error loading alert from brain")
 
   _addQueuesToQueuesList: (queues, server, outputStatus = false) =>
     response = ""
@@ -491,7 +506,7 @@ class HubotActiveMQPlugin extends HubotMessenger
     if server.url.indexOf('https') == 0 then http = 'https://' else http = 'http://'
     url = server.url.replace /^https?:\/\//, ''
     path = "#{http}#{user[0]}:#{user[1]}@#{url}/#{endpoint}"
-    request = @msg.http(path)
+    request = @robot.http(path)
     @_configureRequest request, server
     request[method]() ((err, res, body) -> callback(err, res, body, server))
 
@@ -501,12 +516,6 @@ class HubotActiveMQPlugin extends HubotMessenger
 
   # Handlers
   # --------
-  _handleQueueSizeAlert: (info) =>
-    resp = "An error occurred while contacting Active MQ"
-    if (info.Name)
-      resp = ":red_circle:#{info.Name}'s queue size is currently #{info.QueueSize}:red_circle:"
-    @send resp
-
   _handleDescribeAll: (err, res, body, server) =>
     if err
       @send err
@@ -574,9 +583,14 @@ module.exports = (robot) ->
     _serverManager.setMessage msg
     _serverManager
 
-  _plugin = null
+  # Load alerts from file
+  _plugin = new HubotActiveMQPlugin('', serverManagerFactory(''))
+  _plugin.setRobot robot
+  robot.brain.on 'loaded', ->
+    console.log("Attempting to load alerts from file")
+    _plugin.syncAlerts()
+
   pluginFactory = (msg) ->
-    _plugin = new HubotActiveMQPlugin(msg, serverManagerFactory(msg)) if not _plugin
     _plugin.setMessage msg
     _plugin.setRobot robot
     _plugin
@@ -590,7 +604,7 @@ module.exports = (robot) ->
   robot.respond /m(?:q)? queue stats/i, id: 'activemq.describeQueues', (msg) ->
     pluginFactory(msg).describeAll()
 
-  robot.respond /c(?:heck)? (.*) every (\d+) (days|hours|minutes|seconds) and alert me when (queue size|consumer count) is (>|<|=|<=|>=) (\d+)/i, id: 'activemq.queueAlertSetup', (msg) ->
+  robot.respond /c(?:heck)? (.*) every (\d+) (days|hours|minutes|seconds) and alert me when (queue size|consumer count) is (>|<|=|<=|>=|!=|<>) (\d+)/i, id: 'activemq.queueAlertSetup', (msg) ->
     pluginFactory(msg).queueSizeAlertSetup()
 
   robot.respond /m(?:q)? alert list/i, id: 'activemq.listAlert', (msg) ->
