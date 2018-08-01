@@ -358,7 +358,7 @@ class HubotActiveMQPlugin extends HubotMessenger
             resp += "[#{index}] [#{chanNames[alertObj.getChannel()]}] #{alertObj.toString()}\n"
             index++
           if (resp == "")
-            resp = "It appears you don't have any alerts set up yet in this channel."
+            resp = "It appears you don't have any alerts set up yet."
           @send resp
         )
         .catch((err) => 
