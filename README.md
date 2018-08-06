@@ -40,6 +40,7 @@ Auth should be in the "user:password" format.\
 - ```hubot mq alert stop <AlertNumber>``` - stops given alert.  use alert list to get id
 - ```hubot mq alert stop``` - stops all alerts
 - ```hubot mq check <QueueName> every <X> <days|hours|minutes|seconds> and alert me when <queue size|consumer count> is (>|<|=|<=|>=|!=|<>) <Threshold>``` - Creates an alert that checks <QueueName> at time interval specified for conditions specified and alerts when conditions are met
+- ```hubot mq check broker stats on <server> every <X> <days|hours|minutes|seconds> and alert me when <store percent|memory percent> is (>|<|=|<=|>=|!=|<>) <Threshold>``` - Creates an alert that checks broker stats at time interval specified for conditions specified and alerts when conditions are met
 
 **NOTE: Alerts are currently dependent on the use of a channel id to send alerts (this is due to having to persist the data) and is currently supported with the Slack adapter**
 
