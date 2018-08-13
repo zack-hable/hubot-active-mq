@@ -113,7 +113,7 @@ class ActiveMQAlert
     @_type = type
     @_roomId = roomId
     @_compOp = comparisonOp
-    @_compVal = comparisonVal
+    @_compVal = parseInt(comparisonVal)
     @_job = null
     @_lastFailValue = null
     if (timeUnit.indexOf("days") != -1)
@@ -217,13 +217,13 @@ class ActiveMQAlert
       # load value we need to check against
       valueToCheck = null
       if (@_type == @QUEUE_SIZE)
-        valueToCheck = content.QueueSize
+        valueToCheck = parseInt(content.QueueSize)
       else if (@_type == @CONSUMER_COUNT)
-        valueToCheck = content.ConsumerCount
+        valueToCheck = parseInt(content.ConsumerCount)
       else if (@_type == @STORE_PERCENT)
-        valueToCheck = content.StorePercentUsage
+        valueToCheck = parseInt(content.StorePercentUsage)
       else if (@_type == @MEMORY_PERCENT)
-        valueToCheck = content.MemoryPercentUsage
+        valueToCheck = parseInt(content.MemoryPercentUsage)
 
       # check if it fails our checks
       if (@_alertFail(valueToCheck))
@@ -628,7 +628,7 @@ class HubotActiveMQPlugin extends HubotMessenger
   # --------
   _handleDescribeAll: (err, res, body, server) =>
     if err
-      @send err
+      @send "It appears an error occurred while contacting your Active MQ instance.  The error I received was #{err.code} from #{server.url}.  Please verify that your Active MQ instance is configured properly."
       return
 
     try
@@ -637,30 +637,30 @@ class HubotActiveMQPlugin extends HubotMessenger
       @_describedQueues++
       @send @_describedQueuesResponse if @_describedQueues == @_queuesToDescribe
     catch error
-      @send error
+      @send "It appears an error occurred while contacting your Active MQ instance.  The error I received was #{err.code} from #{server.url}.  Please verify that your Active MQ instance is configured properly."or
   
   
   _handleDescribe: (err, res, body, server) =>
     if err
-      @send err
+      @send "It appears an error occurred while contacting your Active MQ instance.  The error I received was #{err.code} from #{server.url}.  Please verify that your Active MQ instance is configured properly."
       return
 
     try
       content = JSON.parse(body)
       @send @_describeQueue(content.value)
     catch error
-      @send error
+      @send "It appears an error occurred while contacting your Active MQ instance.  The error I received was #{err.code} from #{server.url}.  Please verify that your Active MQ instance is configured properly."or
 
   _handleStats: (err, res, body, server) =>
     if err
-      @send err
+      @send "It appears an error occurred while contacting your Active MQ instance.  The error I received was #{err.code} from #{server.url}.  Please verify that your Active MQ instance is configured properly."
       return
 
     try
       content = JSON.parse(body)
       @send @_describeStats(content.value)
     catch error
-      @send error
+      @send "It appears an error occurred while contacting your Active MQ instance.  The error I received was #{err.code} from #{server.url}.  Please verify that your Active MQ instance is configured properly."or
 
   _handleList: (err, res, body, server) =>
     @_processListResult err, res, body, server
@@ -670,7 +670,7 @@ class HubotActiveMQPlugin extends HubotMessenger
 
   _processListResult: (err, res, body, server, print = true) =>
     if err
-      @send err
+      @send "It appears an error occurred while contacting your Active MQ instance.  The error I received was #{err.code} from #{server.url}.  Please verify that your Active MQ instance is configured properly."
       return
 
     try
@@ -678,7 +678,7 @@ class HubotActiveMQPlugin extends HubotMessenger
       @_addQueuesToQueuesList content.value.Queues, server, print
       @_initComplete() if @_serverManager.hasInitialized()
     catch error
-      @send error
+      @send "It appears an error occurred while contacting your Active MQ instance.  The error I received was #{err.code} from #{server.url}.  Please verify that your Active MQ instance is configured properly."or
 
 
 module.exports = (robot) ->
