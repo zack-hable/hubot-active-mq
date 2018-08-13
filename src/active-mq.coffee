@@ -637,7 +637,7 @@ class HubotActiveMQPlugin extends HubotMessenger
       @_describedQueues++
       @send @_describedQueuesResponse if @_describedQueues == @_queuesToDescribe
     catch error
-      @send "It appears an error occurred while contacting your Active MQ instance.  The error I received was #{err.code} from #{server.url}.  Please verify that your Active MQ instance is configured properly."or
+      @send error
   
   
   _handleDescribe: (err, res, body, server) =>
@@ -649,7 +649,7 @@ class HubotActiveMQPlugin extends HubotMessenger
       content = JSON.parse(body)
       @send @_describeQueue(content.value)
     catch error
-      @send "It appears an error occurred while contacting your Active MQ instance.  The error I received was #{err.code} from #{server.url}.  Please verify that your Active MQ instance is configured properly."or
+      @send error
 
   _handleStats: (err, res, body, server) =>
     if err
@@ -660,7 +660,7 @@ class HubotActiveMQPlugin extends HubotMessenger
       content = JSON.parse(body)
       @send @_describeStats(content.value)
     catch error
-      @send "It appears an error occurred while contacting your Active MQ instance.  The error I received was #{err.code} from #{server.url}.  Please verify that your Active MQ instance is configured properly."or
+      @send error
 
   _handleList: (err, res, body, server) =>
     @_processListResult err, res, body, server
@@ -678,7 +678,7 @@ class HubotActiveMQPlugin extends HubotMessenger
       @_addQueuesToQueuesList content.value.Queues, server, print
       @_initComplete() if @_serverManager.hasInitialized()
     catch error
-      @send "It appears an error occurred while contacting your Active MQ instance.  The error I received was #{err.code} from #{server.url}.  Please verify that your Active MQ instance is configured properly."or
+      @send error
 
 
 module.exports = (robot) ->
